@@ -1,0 +1,272 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Wraps the 'CRFsuite' library <https://github.com/chokkan/crfsuite> allowing users
+to fit a Conditional Random Field model and to apply it on existing data.
+The focus of the implementation is in the area of Natural Language Processing where this R package allows you to easily build and apply models
+for named entity recognition, text chunking, part of speech tagging, intent recognition or classification
+of any category you have in mind. 
+Next to training, a small web application is included in the package to allow you to easily construct training data.
+
+```{r}
+devtools::install_github("bnosac/crfsuite", build_vignettes = TRUE)
+```
+
+```{r}
+library(crfsuite)
+vignette("crfsuite-nlp", package = "crfsuite")
+```
+
+```{r}
+# x <- ner_download_modeldata("wikiner-en-wp2")
+# table(x1$label)
+# x1 %>% filter(label %in% c("I-ORG")) %>% sample_n(size = 10)
+# x1 %>% filter(label %in% c("I-LOC")) %>% sample_n(size = 10)
+# x1 %>% filter(label %in% c("B-ORG")) %>% sample_n(size = 10)
+# x1 %>% filter(label %in% c("B-LOC")) %>% sample_n(size = 10)
+# x1 %>% filter(label %in% c("B-MISC")) %>% sample_n(size = 10)
+# 
+# x1 %>% filter(pos %in% c("NNP")) %>% head()
+# 
+# head(x1$token)
+# head(x1$label)
+# table(x1$pos)
+data("airbnb")
+data("airbnb_chunks")
+```
+
+```{r}
+## More detailed example where text data was annotated with the webapp in the package
+## This data is joined with a tokenised dataset to construct the training data which
+## is further enriched with attributes of upos/lemma in the neighbourhood
+##
+library(udpipe)
+
+#you need a model that can do POS tagging, sentence breaking etc. I am using a dutch model for sentence breaking and pos because the data is in dutch. I will test airbnb data in the next example.
+
+udmodel <- udpipe_download_model("dutch-lassysmall")
+udmodel <- udpipe_load_model(udmodel$file_model)
+
+#to train the model you need unique text with doc_id. Use the annotated file to get these
+airbnb_tokens <- unique(airbnb_chunks[, c("doc_id", "text")])
+
+airbnb_tokens <- udpipe_annotate(udmodel,
+                                      x = airbnb_tokens$text,
+                                      doc_id = airbnb_tokens$doc_id)
+class(airbnb_tokens)
+
+
+airbnb_tokens <- as.data.frame(airbnb_tokens)
+
+x <- merge(airbnb_chunks, airbnb_tokens)
+
+x <- crf_cbind_attributes(x, terms = c("upos", "lemma"), by = "doc_id")
+
+model <- crf(y = x$chunk_entity,
+              x = x[, grep("upos|lemma", colnames(x), value = TRUE)],
+              group = x$doc_id,
+              method = "lbfgs", options = list(max_iterations = 5))
+
+
+stats <- summary(model)
+stats
+
+plot(stats$iterations$loss, type = "b", xlab = "Iteration", ylab = "Loss")
+
+scores <- predict(model,
+                  newdata = x[, grep("upos|lemma", colnames(x))],
+                  group = x$doc_id)
+head(scores)
+
+## cleanup for CRAN
+file.remove(udmodel$file)
+## End(Not run)
+file.remove(model$file_model)
+file.remove("modeldetails.txt")
+```
+
+```{r}
+#Let's try some english data that we need to annotate
+library(textSummary)
+library(tidyverse)
+
+#you need to have 2 columns, 1 is the text and the other one is doc_id so:
+verbatims <- verbatim %>% mutate(doc_id = row_number()) %>% select(doc_id,text)
+
+#save it as RDS to be loaded on to the shiny app for annotation
+saveRDS(verbatims,"verbatim_to_annotate.rds")
+
+#start the app
+rmarkdown::run(system.file(package = "crfsuite", "app", "annotation.Rmd"))
+
+#A new file being created called crfsuite_annotation_verbatim_to_annotate in the parent directory
+#if you close the app without completing all the docs it will save whatever was annotated
+
+library(udpipe)
+
+#you need a model that can do POS tagging, sentence breaking etc. I am using an english model for sentence breaking and pos because the data is in english. You can either download these models manually in order to use it for annotation purposes
+
+#udmodel <- udpipe_download_model("english-partut")
+udmodel <- udpipe_download_model("english-lines")
+udmodel <- udpipe_load_model(udmodel$file_model)
+
+#if already downloaded then load as:
+udmodel <- udpipe_load_model("english-partut-ud-2.0-170801.udpipe")
+
+verbatims <- unique(crfsuite_annotation_verbatim_to_annotate[, c("doc_id", "text")])
+
+#you can use the above downloaded model to annotate i.e. POS, sentence breaking etc.
+verbatim_tokens <- udpipe_annotate(udmodel,
+                                      x = verbatims$text,
+                                      doc_id = verbatims$doc_id)
+class(verbatim_tokens)
+
+verbatim_tokens <- as.data.frame(verbatim_tokens)
+
+x1 <- merge(crfsuite_annotation_verbatim_to_annotate, verbatim_tokens)
+
+x1 <- crf_cbind_attributes(x1, terms = c("upos", "lemma"), by = "doc_id")
+
+model1 <- crf(y = x1$chunk_entity,
+              x = x1[, grep("upos|lemma", colnames(x1), value = TRUE)],
+              group = x1$doc_id,
+              method = "lbfgs", options = list(max_iterations = 15))
+
+stats1 <- summary(model1)
+stats1
+
+plot(stats1$iterations$loss, type = "b", xlab = "Iteration", ylab = "Loss")
+
+```
+
+```{r}
+scores1 <- predict(model1,
+                  newdata = x1[, grep("upos|lemma", colnames(x1))],
+                  group = x1$doc_id)
+table(scores1$label)
+
+```
+
+
+```{r}
+scores
+```
+
+```{r}
+which(scores$label %in% c("I-COMMUNICATION"))
+```
+
+```{r}
+verbatim_tokens[160,]
+```
+
+```{r}
+verbatim_tokens[311,]
+```
+
+```{r}
+which(scores$label %in% c("I-VFM"))
+```
+
+```{r}
+verbatim_tokens[315,]
+```
+
+```{r}
+crfsuite_annotation_verbatim_to_annotate %>% filter(text %in% c("Clear instructions with a fair price offered"))
+```
+
+```{r}
+#using RDRPOSTagger
+devtools::install_github("bnosac/RDRPOSTagger", build_vignettes = TRUE)
+```
+
+```{r}
+library(RDRPOSTagger)
+```
+
+```{r}
+rdr_available_models()
+#define the language and the type of tagger
+tagger <- RDRPOSTagger::rdr_model(language = "English",annotation = "UniversalPOS")
+
+rdr_tagging <- RDRPOSTagger::rdr_pos(object = tagger,x = verbatims$text)
+
+#this adds d at the start of the doc_id. so stripping out the d
+rdr_tagging <- rdr_tagging %>% mutate(doc_id = as.integer(readr::parse_number(doc_id))) %>% rename(upos = pos)
+
+rdr_tagging
+```
+
+```{r}
+table(rdr_tagging$upos)
+```
+
+
+```{r}
+table(verbatim_tokens$upos)
+```
+
+
+```{r}
+rdr_tagging %>% filter(upos %in% c("NUM"))
+```
+
+```{r}
+verbatim_tokens %>% filter(upos %in% c("NUM"))
+```
+
+
+```{r}
+x <- merge(crfsuite_annotation_verbatim_to_annotate,rdr_tagging) #throughs error
+
+x <- merge(rdr_tagging,crfsuite_annotation_verbatim_to_annotate)
+
+#creates dups so unduplicate
+x <- x %>% distinct(doc_id,token_id,.keep_all = TRUE)
+x
+
+x <- crf_cbind_attributes(x, terms = c("upos"), by = "doc_id")
+
+
+
+model2 <- crf(y = x$chunk_entity,
+              x = x[, grep("upos|lemma", colnames(x), value = TRUE)],
+              group = x$doc_id,
+              method = "lbfgs", options = list(max_iterations = 15))
+
+stats2 <- summary(model2)
+stats2
+```
+
+```{r}
+plot(stats2$iterations$loss, type = "b", xlab = "Iteration", ylab = "Loss")
+
+```
+
+```{r}
+
+scores2 <- predict(model2,
+                  newdata = x[, grep("upos|lemma", colnames(x))],
+                  group = x$doc_id)
+table(scores2$label)
+```
+
+```{r}
+table(scores1$label)
+```
+
+```{r}
+which(scores1$label %in% c("COMPETITOR"))
+```
+
+```{r}
+x_dedup[19,]
+```
+
+```{r}
+x[872,]
+```
+
