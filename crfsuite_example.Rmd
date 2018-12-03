@@ -87,10 +87,14 @@ file.remove(model$file_model)
 file.remove("modeldetails.txt")
 ```
 
+## Original Example
+
 ```{r}
+library(crfsuite)
 #Let's try some english data that we need to annotate
 library(textSummary)
 library(tidyverse)
+library(ggplot2)
 
 #you need to have 2 columns, 1 is the text and the other one is doc_id so:
 verbatims <- verbatim %>% mutate(doc_id = row_number()) %>% select(doc_id,text)
@@ -108,27 +112,693 @@ library(udpipe)
 
 #you need a model that can do POS tagging, sentence breaking etc. I am using an english model for sentence breaking and pos because the data is in english. You can either download these models manually in order to use it for annotation purposes
 
-#udmodel <- udpipe_download_model("english-partut")
-udmodel <- udpipe_download_model("english-lines")
-udmodel <- udpipe_load_model(udmodel$file_model)
+# #udmodel <- udpipe_download_model("english-partut")
+# udmodel <- udpipe_download_model("english-lines")
+# udmodel <- udpipe_load_model(udmodel$file_model)
+# 
+# #if already downloaded then load as:
+# udmodel <- udpipe_load_model("english-partut-ud-2.0-170801.udpipe")
+# 
 
-#if already downloaded then load as:
-udmodel <- udpipe_load_model("english-partut-ud-2.0-170801.udpipe")
 
-verbatims <- unique(crfsuite_annotation_verbatim_to_annotate[, c("doc_id", "text")])
+# Not using the above model but will tokenise with a commercially fine model which is downloaded from here: https://github.com/bnosac/udpipe.models.ud
 
-#you can use the above downloaded model to annotate i.e. POS, sentence breaking etc.
-verbatim_tokens <- udpipe_annotate(udmodel,
-                                      x = verbatims$text,
-                                      doc_id = verbatims$doc_id)
-class(verbatim_tokens)
+verbatim_tokens <- udpipe(verbatims, "english", udpipe_model_repo = "bnosac/udpipe.models.ud")
 
-verbatim_tokens <- as.data.frame(verbatim_tokens)
+verbatim_tokens <- udpipe(verbatims, "english-ud-2.1-20180111.udpipe")
+
+str(verbatim_tokens)
+# udmodel <- udpipe_load_model("english-ud-2.1-20180111.udpipe")
+# verbatim_tokens <- udpipe_annotate(udmodel,
+#                                       x = verbatims$text,
+#                                       doc_id = verbatims$doc_id)
+# 
+# class(verbatim_tokens)
+# verbatim_tokens <- as.data.frame(verbatim_tokens, detailed = TRUE)
 
 x1 <- merge(crfsuite_annotation_verbatim_to_annotate, verbatim_tokens)
 
 x1 <- crf_cbind_attributes(x1, terms = c("upos", "lemma"), by = "doc_id")
 
+table(x1$upos)
+
+```
+
+```{r}
+x1 %>% filter(upos %in% c("NOUN"))
+```
+
+```{r}
+verbatim_tokens %>%
+  count(upos,sort = TRUE) %>%
+  mutate(upos = reorder(upos,n))%>%
+  ggplot(aes(x=upos,y=n,fill=upos))+
+  ggplot2::geom_bar(stat = "identity")+
+  ggplot2::theme_dark()+
+  ggplot2::coord_flip()+
+  ggplot2::theme(legend.position = "none")+
+  ggplot2::labs(title = "UPOS (Universal Parts of Speech)\n frequency of occurrence", 
+         y = "Freq")
+```
+
+```{r}
+verbatim_tokens %>% filter(upos %in% c("X"))
+```
+
+```{r}
+verbatim_tokens %>% filter(upos %in% c("SYM"))
+```
+
+```{r}
+## NOUNS
+verbatim_tokens %>%
+  filter(upos %in% c("NOUN"))%>%
+  count(token,sort = TRUE) %>%
+  top_n(20)%>%
+  mutate(token = reorder(token,n))%>%
+  ggplot(aes(x=token,y=n,fill=token))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Most occurring Nouns", 
+         y = "Freq")
+
+```
+
+```{r}
+## Adjectives
+verbatim_tokens %>%
+  filter(upos %in% c("ADJ"))%>%
+  count(token,sort = TRUE) %>%
+  top_n(20)%>%
+  mutate(token = reorder(token,n))%>%
+  ggplot(aes(x=token,y=n,fill=token))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Most occurring Adjectives", 
+         y = "Freq")
+
+```
+
+```{r}
+## Verbs
+verbatim_tokens %>%
+  filter(upos %in% c("VERB"))%>%
+  count(token,sort = TRUE) %>%
+  top_n(20)%>%
+  mutate(token = reorder(token,n))%>%
+  ggplot(aes(x=token,y=n,fill=token))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Most occurring VERBS", 
+         y = "Freq")
+
+```
+
+## TOP NOUN—VERB Pairs as Keyword pairs
+
+In English (or probably in many languages), Simple a noun and a verb can form a phrase. Like, Dog barked—with the noun Dog and Barked, we can understand the context of the sentence. Noun phrases are of common interest when doing natural language processing. Extracting noun phrases from text can be done easily by defining a sequence of Parts of Speech tags. For example this sequence of POS tags can be seen as a noun phrase: Adjective, Noun, Preposition, Noun.
+This function recodes Universal POS tags to one of the following 1-letter tags, in order to simplify writing regular expressions to find Parts of Speech sequences:
+
+A: adjective
+
+C: coordinating conjuction
+
+D: determiner
+
+M: modifier of verb
+
+N: noun or proper noun
+
+P: preposition
+
+O: other elements
+
+
+
+```{r}
+table(as_phrasemachine(verbatim_tokens$upos, type = "upos"))
+```
+
+```{r}
+## Using a sequence of POS tags (noun phrases / adj phrases)
+verbatim_tokens$phrase_tag <- as_phrasemachine(verbatim_tokens$upos, type = "upos")
+
+noun_adj_phrases <- keywords_phrases(x = verbatim_tokens$phrase_tag, 
+                          term = tolower(verbatim_tokens$token), 
+                          pattern = "(A|N)*N(P+D*(A|N)*N)*", #start with adjective or noun, another noun, 
+                                                             #a preposition, determiner adjective or noun and
+                                                             #next a noun again.
+                          is_regex = TRUE, detailed = FALSE)
+
+noun_adj_phrases %>% filter(ngram > 1 & freq > 2) %>% arrange(desc(freq)) %>% head(20) %>%
+  mutate(keyword = reorder(keyword,freq)) %>%
+  ggplot(aes(x = keyword, y=freq,fill = keyword)) +
+   geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Simple Noun Phrases", 
+         y = "Freq")
+
+```
+
+```{r}
+stats <- subset(noun_adj_phrases, ngram > 1 & freq > 3)
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ freq, data = head(stats, 20), col = "magenta", 
+         main = "Keywords - simple noun phrases", xlab = "Frequency")
+
+```
+
+```{r}
+verb_phrases <- keywords_phrases(x = verbatim_tokens$phrase_tag, 
+                          term = tolower(verbatim_tokens$token), 
+                          pattern = "((A|N)*N(P+D*(A|N)*N)*P*(M|V)*V(M|V)*|(M|V)*V(M|V)*D*(A|N)*N(P+D*(A|N)*N)*|(M|V)*V(M|V)*(P+D*(A|N)*N)+|(A|N)*N(P+D*(A|N)*N)*P*((M|V)*V(M|V)*D*(A|N)*N(P+D*(A|N)*N)*|(M|V)*V(M|V)*(P+D*(A|N)*N)+))",
+                          is_regex = TRUE, detailed = FALSE)
+
+verb_phrases %>% filter(ngram > 1 & freq > 2) %>% arrange(desc(freq)) %>% head(20) %>%
+  mutate(keyword = reorder(keyword,freq)) %>%
+  ggplot(aes(x = keyword, y=freq,fill = keyword)) +
+   geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Simple verb Phrase", 
+         y = "Freq")
+```
+
+```{r}
+noun_cord_conj_phrases <- keywords_phrases(x = verbatim_tokens$phrase_tag, 
+                          term = tolower(verbatim_tokens$token), 
+                          pattern = "((A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*(C(D(CD)*)*(A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*)*)",
+                          is_regex = TRUE, detailed = FALSE)
+
+noun_cord_conj_phrases %>% filter(ngram > 1 & freq > 2) %>% arrange(desc(freq)) %>% head(20) %>%
+  mutate(keyword = reorder(keyword,freq)) %>%
+  ggplot(aes(x = keyword, y=freq,fill = keyword)) +
+   geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Noun phrase with coordination conjuction", 
+         y = "Freq")
+```
+
+```{r}
+verb_cord_conj_phrases <- keywords_phrases(x = verbatim_tokens$phrase_tag, 
+                          term = tolower(verbatim_tokens$token), 
+                          pattern = "(((A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*(C(D(CD)*)*(A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*)*)(P(CP)*)*(M(CM)*|V)*V(M(CM)*|V)*(C(M(CM)*|V)*V(M(CM)*|V)*)*|(M(CM)*|V)*V(M(CM)*|V)*(C(M(CM)*|V)*V(M(CM)*|V)*)*(D(CD)*)*((A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*(C(D(CD)*)*(A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*)*)|(M(CM)*|V)*V(M(CM)*|V)*(C(M(CM)*|V)*V(M(CM)*|V)*)*((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)+|((A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*(C(D(CD)*)*(A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*)*)(P(CP)*)*((M(CM)*|V)*V(M(CM)*|V)*(C(M(CM)*|V)*V(M(CM)*|V)*)*(D(CD)*)*((A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*(C(D(CD)*)*(A(CA)*|N)*N((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)*)*)|(M(CM)*|V)*V(M(CM)*|V)*(C(M(CM)*|V)*V(M(CM)*|V)*)*((P(CP)*)+(D(CD)*)*(A(CA)*|N)*N)+))",
+                          is_regex = TRUE, detailed = FALSE)
+
+verb_cord_conj_phrases %>% filter(ngram > 1 & freq > 2) %>% arrange(desc(freq)) %>% head(20) %>%
+  mutate(keyword = reorder(keyword,freq)) %>%
+  ggplot(aes(x = keyword, y=freq,fill = keyword)) +
+   geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Verb phrase with coordination conjuction", 
+         y = "Freq")
+```
+
+##Automated keywords extraction using RAKE
+Rapid Automatic Keyword Extraction(RAKE) algorithm is one of the most popular(unsupervised) algorithms for extracting keywords in Information retrieval. It looks for keywords by looking to a contiguous sequence of words which do not contain irrelevant words.
+Frequency statistics of words are nice but most of the time, you are getting stuck in words which only make sense in combination with other words. Hence you want to find keywords which are a combination of words.
+
+```{r}
+## Using RAKE
+rake_keywords <- keywords_rake(x = verbatim_tokens, term = "lemma", group = "doc_id", 
+                       relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"))
+
+rake_keywords$key <- factor(rake_keywords$keyword, levels = rev(rake_keywords$keyword))
+
+barchart(key ~ rake, data = head(subset(rake_keywords, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by RAKE", 
+         xlab = "Rake")
+```
+
+```{r}
+rake_keywords %>% filter(freq > 3) %>% arrange(desc(rake)) %>% head(20) %>%
+   mutate(keyword = reorder(keyword,rake)) %>%
+  ggplot(aes(x = keyword, y=rake,fill = keyword)) +
+   geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Keywords identified by RAKE", 
+         y = "Rake Score")
+```
+
+```{r}
+## Using Pointwise Mutual Information Collocations
+verbatim_tokens$word <- tolower(verbatim_tokens$token)
+pmi_keywords <- keywords_collocation(x = verbatim_tokens, term = "word", group = "doc_id")
+
+pmi_keywords %>% filter(freq > 3) %>% arrange(desc(pmi)) %>% head(20) %>%
+   mutate(keyword = reorder(keyword,pmi)) %>%
+  ggplot(aes(x = keyword, y=pmi,fill = keyword)) +
+   geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Keywords identified by Pointwise Mutual Information Collocations", 
+         y = "PMI Score")
+
+
+```
+
+```{r}
+pmi_keywords$key <- factor(pmi_keywords$keyword, levels = rev(pmi_keywords$keyword))
+barchart(key ~ pmi, data = head(subset(pmi_keywords, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by PMI Collocation", 
+         xlab = "PMI (Pointwise Mutual Information)")
+```
+
+## Co-occurrences
+Co-occurrences allow to see how words are used either in the same sentence or next to each other. This R package make creating co-occurrence graphs using the relevant Parts of Speech tags as easy as possible.
+
+Nouns / adjectives used in same sentence
+In this example we look how many times nouns and adjectives are used in the same sentence.
+
+```{r}
+cooc <- cooccurrence(x = subset(verbatim_tokens, upos %in% c("NOUN", "ADJ")), 
+                     term = "lemma", 
+                     group = c("doc_id", "paragraph_id", "sentence_id"))
+head(cooc)
+```
+
+```{r}
+library(igraph)
+library(ggraph)
+library(ggplot2)
+wordnetwork <- head(cooc, 30)
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link(aes(width = cooc, edge_alpha = cooc), edge_colour = "pink") +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial Narrow") +
+  theme(legend.position = "none") +
+  labs(title = "Cooccurrences within sentence", subtitle = "Nouns & Adjective")
+```
+
+
+## Nouns / adjectives which follow one another
+If you are interested in visualising which words follow one another. This can be done by calculating word cooccurrences of a specific Parts of Speech type which follow one another where you can specify how far away you want to look regarding 'following one another' (in the example below we indicate skipgram = 1 which means look to the next word and the word after that).
+
+```{r}
+cooc <- cooccurrence(verbatim_tokens$lemma, 
+                     relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"), 
+                     skipgram = 1)
+head(cooc)
+```
+
+```{r}
+library(igraph)
+library(ggraph)
+library(ggplot2)
+wordnetwork <- head(cooc, 15)
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link(aes(width = cooc, edge_alpha = cooc)) +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial Narrow") +
+  labs(title = "Words following one another", subtitle = "Nouns & Adjective")
+```
+
+## Keyword based topic modelling
+
+
+You mostly get better, more interpretable results in topic models if you include compound keywords in the model. Let's show the steps how you can accomplish this.
+
+1. First get keywords using either the keywords_rake, keywords_phrases, keywords_collocation functions or with functionality from the textrank R package using textrank_keywords() method.
+2. Use function txt_recode_ngram to recode words to keywords. This will replace a sequence of words with its compound multi-word expression by first starting with words which contain more terms.
+3. Use docment_term_frequencies() to calculate freqs of the compound words you just created
+4. Use document_term_matrix on step 3.
+3. Build the LDA model on step 4
+
+In the below example, we are building a topic model on all nouns, all compound keywords which consists of nouns and adjectives and on all identified noun phrases.
+
+```{r}
+keyw_rake <- keywords_rake(verbatim_tokens, term = "token", group = c("doc_id","paragraph_id","sentence_id"),
+                           relevant = verbatim_tokens$upos %in% c("NOUN","ADJ"),
+                           ngram_max = 3, n_min = 5)
+
+## Now to find simple Noun phrases, first convert Parts of Speech tags to one-letter tags which can be used to identify phrases based on regular expressions
+verbatim_tokens$phrase_tag <- as_phrasemachine(verbatim_tokens$upos, type = "upos")
+
+# now phrase_tag can be used to create regex and get simple nouns phrases:
+keyw_nounphrases <- keywords_phrases(verbatim_tokens$phrase_tag, term = verbatim_tokens$token,
+                                     pattern = "(A|N)*N(P+D*(A|N)*N)*", is_regex = TRUE, 
+                                     detailed = FALSE)
+
+#above gives everything, so just filter to include ngram > 1 to get compound words
+keyw_nounphrases <- keyw_nounphrases %>% filter(ngram > 1)
+
+## Now recode terms to keywords 
+verbatim_tokens$term <- verbatim_tokens$token
+verbatim_tokens$term <- txt_recode_ngram(verbatim_tokens$term, 
+                           compound = keyw_rake$keyword, ngram = keyw_rake$ngram)
+
+verbatim_tokens$term <- txt_recode_ngram(verbatim_tokens$term, 
+                           compound = keyw_nounphrases$keyword, ngram = keyw_nounphrases$ngram)
+
+## Keep keyword or just plain nouns
+verbatim_tokens$term <- ifelse(verbatim_tokens$upos %in% "NOUN", verbatim_tokens$term,
+                        ifelse(verbatim_tokens$term %in% c(keyw_rake$keyword, keyw_nounphrases$keyword), 
+                                                                              verbatim_tokens$term, NA))
+# create topic level id to build the term frequencies
+verbatim_tokens$topic_level_id <- unique_identifier(verbatim_tokens,fields = c("doc_id","paragraph_id","sentence_id"))
+
+## Build document/term/matrix
+dtm <- document_term_frequencies(verbatim_tokens, document = "topic_level_id", term = "term")
+dtm <- document_term_matrix(x = dtm)
+dtm <- dtm_remove_lowfreq(dtm, minfreq = 5)
+```
+
+Once we have our document/term/matrix, topic modelling is simple. Keep in mind that you need to tune your topic model, which is not done below. See the topicmodels and ldatuning R package which show you how to do that.
+
+```{r}
+library(topicmodels)
+m <- LDA(dtm, k = 5, method = "Gibbs", 
+         control = list(nstart = 5, burnin = 2000, best = TRUE, seed = 1:5))
+```
+
+You'll see that the topic model now includes keywords
+
+```{r}
+topicterminology <- predict(m, type = "terms", min_posterior = 0.10, min_terms = 4)
+topicterminology
+
+```
+
+## do the same but with textRank()
+
+```{r}
+library(textrank)
+keyw_rank <- textrank_keywords(verbatim_tokens$token, 
+                          relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"),
+                          ngram_max = 3)
+
+## Now to find simple Noun phrases, first convert Parts of Speech tags to one-letter tags which can be used to identify phrases based on regular expressions
+verbatim_tokens$phrase_tag <- as_phrasemachine(verbatim_tokens$upos, type = "upos")
+
+# now phrase_tag can be used to create regex and get simple nouns phrases:
+keyw_nounphrases <- keywords_phrases(verbatim_tokens$phrase_tag, term = verbatim_tokens$token,
+                                     pattern = "(A|N)*N(P+D*(A|N)*N)*", is_regex = TRUE, 
+                                     detailed = FALSE)
+
+#above gives everything, so just filter to include ngram > 1 to get compound words
+keyw_nounphrases <- keyw_nounphrases %>% filter(ngram > 1)
+
+## Now recode terms to keywords 
+verbatim_tokens$term <- verbatim_tokens$token
+verbatim_tokens$term <- txt_recode_ngram(verbatim_tokens$term, 
+                           compound = keyw_rank$keyword, ngram = keyw_rank$ngram)
+
+verbatim_tokens$term <- txt_recode_ngram(verbatim_tokens$term, 
+                           compound = keyw_nounphrases$keyword, ngram = keyw_nounphrases$ngram)
+
+## Keep keyword or just plain nouns
+verbatim_tokens$term <- ifelse(verbatim_tokens$upos %in% "NOUN", verbatim_tokens$term,
+                        ifelse(verbatim_tokens$term %in% c(keyw_rank$keyword, keyw_nounphrases$keyword), 
+                                                                              verbatim_tokens$term, NA))
+# create topic level id to build the term frequencies
+verbatim_tokens$topic_level_id <- unique_identifier(verbatim_tokens,fields = c("doc_id","paragraph_id","sentence_id"))
+
+## Build document/term/matrix
+dtm <- document_term_frequencies(verbatim_tokens, document = "topic_level_id", term = "term")
+dtm <- document_term_matrix(x = dtm)
+dtm <- dtm_remove_lowfreq(dtm, minfreq = 5)
+head(dtm)
+```
+
+```{r}
+library(topicmodels)
+m <- LDA(dtm, k = 5, method = "Gibbs", 
+         control = list(nstart = 5, burnin = 2000, best = TRUE, seed = 1:5))
+```
+
+You'll see that the topic model now includes keywords
+
+```{r}
+topicterminology <- predict(m, type = "terms", min_posterior = 0.10, min_terms = 4)
+topicterminology
+
+```
+
+### we can get topic predictions using predict on the same dtm
+
+
+```{r}
+predict(m, newdata = dtm, type = "topics") 
+```
+
+### this gives us doc_id for each document in a particular topic
+
+```{r}
+
+table(predict(m, newdata = dtm, type = "topics") %>% select(topic_label))
+```
+
+### we can see that more topics are in topic one... let's get all sentences for this topic 1
+
+```{r}
+predict(m, newdata = dtm, type = "topics") %>% filter(topic ==1 )
+```
+
+## we can get all the sentences in that topic by:
+
+```{r}
+topic1 <- predict(m, newdata = dtm, type = "topics") %>% filter(topic ==1 )
+
+topic1 <- topic1 %>% inner_join(verbatim_tokens) %>% distinct(doc_id,sentence_id,sentences,.keep_all = TRUE) %>% select(doc_id,paragraph_id,sentence_id,sentence,upos,lemma)
+
+topic1
+```
+
+## now we can run textrank on these sentences to create a summary sentences for this topic
+
+```{r}
+terminology <- topic1 %>% filter(upos %in% c("NOUN", "ADJ")) %>% 
+                                    select(sentence_id,lemma) %>% 
+                                    distinct(sentence_id,lemma)
+terminology
+```
+
+```{r}
+## Limit the number of candidates with the minhash algorithm
+library(textreuse)
+
+minhash <- minhash_generator(n = 1000, seed = 123456789) # "n" needs to be double of "bands"
+
+candidates <- textrank_candidates_lsh(x = terminology$lemma, 
+                                      sentence_id = terminology$sentence_id,
+                                      minhashFUN = minhash, 
+                                      bands = 500)
+dim(candidates)
+```
+
+```{r}
+topic1$textrank_id <- unique_identifier(topic1, fields = c("doc_id", "paragraph_id", "sentence_id"))
+
+tr <- textrank_sentences(data = unique(topic1[, c("textrank_id", "sentence")]), 
+                         terminology = terminology)
+
+## see more than top 20 important sentences:
+
+summary(tr, n = 20, keep.sentence.order = TRUE)
+```
+
+
+## Other option to build document term matricis
+In the above example, nouns which were part of a compound multi-word-expression (mwe) were replaced by the multi-word-expression. Sometimes however, you want to keep the noun as well as the multi-word expression in the topic model even if the noun is always part of a multi-word expression. You can do this as follows.
+
+```{r}
+## Recode tokens to keywords, if it is not in the list of tokens, set to NA
+verbatim_tokens$mwe <- txt_recode_ngram(verbatim_tokens$token, 
+                                        compound = keyw_rake$keyword, ngram = keyw_rake$ngram)
+verbatim_tokens$mwe <- ifelse(verbatim_tokens$mwe %in% keyw_rake$keyword, verbatim_tokens$mwe, NA)
+
+## nouns
+verbatim_tokens$term_noun <- ifelse(verbatim_tokens$upos %in% "NOUN", verbatim_tokens$token, NA)
+
+## Build document/term/matrix 
+dtm <- document_term_frequencies(verbatim_tokens, document = "topic_level_id", term = c("term_noun", "mwe"))
+dtm <- document_term_matrix(x = dtm)
+dtm <- dtm_remove_lowfreq(dtm, minfreq = 3)
+m <- LDA(dtm, k = 5, method = "Gibbs", 
+         control = list(nstart = 5, burnin = 2000, best = TRUE, seed = 1:5))
+
+predict(m, type = "terms", min_posterior = 0.10, min_terms = 4)
+
+```
+
+
+## Topic modelling only on specific POS tags
+
+You can easily go from annotated data.frame (verbatim_tokens) to a document-term-matrix which is used by a lot of other text mining R packages. In this case, we will build topics at the sentence level.
+
+The advantage of this package over other packages is that
+
+1. topic modelling can be done directly on the right terms as these can be easily identified with the Parts of Speech tag: mostly you are only interested in nouns and verbs or only in finding topics adjectives if you are interested in sentiment clustering.
+2. you don't have to build a long list of stopwords any more
+3. you can work based on the lemma instead of the plain token, making the words resemble more each other
+4. you can easily include compound keywords
+
+Below we fit a topic model on the nouns only.
+
+
+```{r}
+verbatim_tokens$topic_level_id <- unique_identifier(verbatim_tokens, fields = c("doc_id", "paragraph_id", "sentence_id"))
+
+## Get a data.frame with 1 row per topic_level_id/lemma
+dtf <- verbatim_tokens %>% filter(upos %in% c("NOUN"))
+
+dtf <- document_term_frequencies(dtf, document = "topic_level_id", term = "lemma")
+
+head(dtf)
+```
+
+```{r}
+## Create a document/term/matrix for building a topic model
+dtm <- document_term_matrix(x = dtf)
+## Remove words which do not occur that much
+dtm_clean <- dtm_remove_lowfreq(dtm, minfreq = 5)
+head(dtm_colsums(dtm_clean),20)
+```
+
+## you can remove terms you dont like or get the top 50 terms 
+
+```{r}
+##  keep top 50 nouns based on mean term-frequency-inverse document frequency
+dtm_clean <- dtm_remove_tfidf(dtm_clean, top = 50)
+```
+
+## Once we have our document/term/matrix, topic modelling is simple
+
+```{r}
+library(topicmodels)
+m <- LDA(dtm_clean, k = 4, method = "Gibbs", 
+         control = list(nstart = 5, burnin = 2000, best = TRUE, seed = 1:5))
+
+topicterminology <- predict(m, type = "terms", min_posterior = 0.025, min_terms = 5)
+scores <- predict(m, newdata = dtm, type = "topics")
+```
+
+## Topic visualisation
+Once you have topics, visualising these can also be easily done with the igraph and ggraph packages. Below one possible plot is shown. It shows for a certain topic the co-occurrence of terms
+
+```{r}
+library(igraph)
+library(ggraph)
+library(ggplot2)
+x_topics <- merge(verbatim_tokens, scores, by.x="topic_level_id", by.y="doc_id")
+wordnetwork <- subset(x_topics, topic %in% 1 & lemma %in% topicterminology[[1]]$term)
+wordnetwork <- cooccurrence(wordnetwork, group = c("topic_level_id"), term = "lemma")
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link(aes(width = cooc, edge_alpha = cooc), edge_colour = "pink")  +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial Narrow") +
+  labs(title = "Words in topic 1 ", subtitle = "Nouns & Adjective cooccurrence")
+```
+
+## Text Summarisation using TextRank
+
+```{r}
+head(verbatim_tokens[, c("sentence_id", "lemma", "upos")], 10)
+```
+
+## Textrank for keyword extraction
+For extracting keywords in the verbatim, we are providing it a vector of words and a vector of logicals indicating for each word if it is relevant. In the below case we consider only nouns, verbs and adjectives as relevant.
+
+```{r}
+library(textrank)
+keyw <- textrank_keywords(verbatim_tokens$lemma,
+                          relevant = verbatim_tokens$upos %in% c("NOUN", "VERB", "ADJ"))
+
+class(keyw)
+subset(keyw$keywords, ngram > 1 & freq > 1)
+```
+
+```{r,fig.width=7}
+stats <- subset(keyw$keywords, ngram > 1 & freq >= 5)
+library(wordcloud)
+wordcloud(words = stats$keyword, freq = stats$freq)
+```
+
+
+## Textrank for sentence ranking
+The algorithm basically computes weights between sentences by looking which words are overlapping.
+
+You probably do not want to look for overlap in words like ‘the’, ‘and’, ‘or’, … That is why, most of the time you probably will have already executed some Parts of Speech tagging in order to identify nouns, verbs, adjectives, … or you might have set up your own dictionary of words which you want to consider to find overlap between sentences.
+
+### Step 1 - Define sentences and terminology
+
+```{r}
+sentences <- verbatim_tokens %>% distinct(sentence_id,sentence) %>% select(sentence_id,sentence)
+
+terminology <- verbatim_tokens %>% filter(upos %in% c("NOUN", "ADJ")) %>% 
+                                    select(sentence_id,lemma) %>% 
+                                    distinct(sentence_id,lemma)
+terminology
+```
+
+## Step 2 - Minhash
+If there were 37 sentences. It gives 666 combinations of sentences to calculate word overlap. If you have a large number of sentences, this becomes computationally unfeasible.
+
+That is why you can provide in the argument textrank_candidates, it is a data.frame with sentence combinations for which you want to compute the Jaccard distance. This can be used for example to reduce the number of sentence combinations by applying the Minhash algorithm as shown below.
+
+The result is you saving computation time. For good settings on n and bands which should be set in conjunction with the  textrank_dist function, have a look at the vignette of the textreuse package.
+
+```{r}
+## Limit the number of candidates with the minhash algorithm
+library(textreuse)
+
+minhash <- minhash_generator(n = 1000, seed = 123456789) # "n" needs to be double of "bands"
+
+candidates <- textrank_candidates_lsh(x = terminology$lemma, 
+                                      sentence_id = terminology$sentence_id,
+                                      minhashFUN = minhash, 
+                                      bands = 500)
+dim(candidates)
+```
+
+```{r}
+head(candidates)
+```
+
+## Step 3 - Apply text rank on sentences
+
+```{r}
+verbatim_tokens$textrank_id <- unique_identifier(verbatim_tokens, fields = c("doc_id", "paragraph_id", "sentence_id"))
+
+tr <- textrank_sentences(data = unique(verbatim_tokens[, c("textrank_id", "sentence")]), 
+                         terminology = terminology,
+                         textrank_candidates = candidates)
+
+## see more than top 5 important sentences:
+
+tr
+```
+
+
+```{r}
+summary(tr, n = 20, keep.sentence.order = TRUE)
+```
+
+```{r}
+summary(tr)
+```
+
+
+```{r}
 model1 <- crf(y = x1$chunk_entity,
               x = x1[, grep("upos|lemma", colnames(x1), value = TRUE)],
               group = x1$doc_id,
@@ -138,6 +808,14 @@ stats1 <- summary(model1)
 stats1
 
 plot(stats1$iterations$loss, type = "b", xlab = "Iteration", ylab = "Loss")
+```
+
+
+```{r}
+scores1 <- predict(model1,
+                  newdata = x1[, grep("upos|lemma", colnames(x1))],
+                  group = x1$doc_id)
+table(scores1$label,x1$chunk_entity)
 
 ```
 
@@ -151,15 +829,15 @@ table(scores1$label)
 
 
 ```{r}
-scores
+scores1
 ```
 
 ```{r}
-which(scores$label %in% c("I-COMMUNICATION"))
+which(scores1$label %in% c("B-COMPETITOR"))
 ```
 
 ```{r}
-verbatim_tokens[160,]
+verbatim_tokens[276,]
 ```
 
 ```{r}
@@ -251,6 +929,9 @@ plot(stats2$iterations$loss, type = "b", xlab = "Iteration", ylab = "Loss")
 scores2 <- predict(model2,
                   newdata = x[, grep("upos|lemma", colnames(x))],
                   group = x$doc_id)
+x$entity <- scores2$label
+table(x$entity, x$chunk_entity)
+
 table(scores2$label)
 ```
 
@@ -268,5 +949,628 @@ x_dedup[19,]
 
 ```{r}
 x[872,]
+```
+```{r}
+verbatim_tokens %>%
+  count(upos,sort = TRUE) %>%
+  mutate(upos = reorder(upos,n))%>%
+  ggplot(aes(x=upos,y=n,fill=upos))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "UPOS (Universal Parts of Speech)\n frequency of occurrence", 
+         y = "Freq")
+```
+
+```{r}
+## NOUNS
+verbatim_tokens %>%
+  filter(upos %in% c("NOUN"))%>%
+  count(token,sort = TRUE) %>%
+  top_n(20)%>%
+  mutate(token = reorder(token,n))%>%
+  ggplot(aes(x=token,y=n,fill=token))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Most occurring Nouns", 
+         y = "Freq")
+
+```
+
+```{r}
+## VERBS
+verbatim_tokens %>%
+  filter(upos %in% c("VERB"))%>%
+  count(token,sort = TRUE) %>%
+  top_n(10)%>%
+  mutate(token = reorder(token,n))%>%
+  ggplot(aes(x=token,y=n,fill=token))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Most occurring VERBS", 
+         y = "Freq")
+
+```
+
+```{r}
+## ADJECTIVES
+verbatim_tokens %>%
+  filter(upos %in% c("ADJ"))%>%
+  count(token,sort = TRUE) %>%
+  top_n(10)%>%
+  mutate(token = reorder(token,n))%>%
+  ggplot(aes(x=token,y=n,fill=token))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Most occurring ADJ", 
+         y = "Freq")
+
+```
+
+Finding keywords
+Frequency statistics of words are nice but most of the time, you are getting stuck in words which only make sense in combination with other words. Hence you want to find keywords which are a combination of words.
+
+Currently, this R package provides 3 methods to identify keywords in text
+
+RAKE (Rapid Automatic Keyword Extraction)
+Collocation ordering using Pointwise Mutual Information
+Parts of Speech phrase sequence detection
+
+```{r}
+library(lattice)
+## Using RAKE
+stats <- keywords_rake(x = verbatim_tokens, term = "lemma", group = "doc_id", 
+                       relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"))
+
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+
+barchart(key ~ rake, data = head(subset(stats, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by RAKE", 
+         xlab = "Rake")
+```
+```{r}
+stats %>% filter(freq > 3) %>%
+  mutate(keyword = reorder(keyword,rake)) %>%
+  head(20) %>%
+  ggplot(aes(x=keyword,y = rake, fill=keyword))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Keywords based on RAKE ALGORITHM", 
+         y = "RAKE SCORE")
+```
+
+```{r}
+stats %>% filter(freq > 10) %>%
+  mutate(keyword = reorder(keyword,rake)) %>%
+  head(20) %>%
+  ggplot(aes(x=keyword,y = rake, fill=keyword))+
+  geom_bar(stat = "identity")+
+  theme_dark()+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(title = "Keywords based on RAKE ALGORITHM", 
+         y = "RAKE SCORE")
+```
+```{r}
+## Collocation (words following one another)
+stats4 <- keywords_collocation(x = verbatim_tokens, 
+                             term = "token", group = c("doc_id", "paragraph_id", "sentence_id"),
+                             ngram_max = 4)
+## Co-occurrences: How frequent do words occur in the same sentence, in this case only nouns or adjectives
+stats5 <- cooccurrence(x = subset(verbatim_tokens, upos %in% c("NOUN", "ADJ")), 
+                     term = "lemma", group = c("doc_id", "paragraph_id", "sentence_id"))
+## Co-occurrences: How frequent do words follow one another
+stats6 <- cooccurrence(x = verbatim_tokens$lemma, 
+                     relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"))
+## Co-occurrences: How frequent do words follow one another even if we would skip 2 words in between
+stats7 <- cooccurrence(x = verbatim_tokens$lemma, 
+                     relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"), skipgram = 2)
+head(stats4)
+```
+
+```{r}
+library(igraph)
+library(ggraph)
+library(ggplot2)
+wordnetwork <- head(stats4, 30)
+wordnetwork <- graph_from_data_frame(wordnetwork)
+ggraph(wordnetwork, layout = "fr") +
+  geom_edge_link( edge_colour = "pink") +
+  geom_node_text(aes(label = name), col = "darkgreen", size = 4) +
+  theme_graph(base_family = "Arial Narrow") +
+  theme(legend.position = "none") +
+  labs(title = "Cooccurrences within 3 words distance", subtitle = "Nouns & Adjective")
+```
+
+
+```{r}
+stats5 <- as.data.frame(stats5,detailed = TRUE)
+head(stats5)
+```
+
+```{r}
+class(stats6)
+```
+
+```{r}
+stats7 <- textrank_keywords(verbatim_tokens$lemma, 
+                          relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"), 
+                          ngram_max = 8, sep = " ")
+stats7 <- subset(stats7$keywords, ngram > 1 & freq >= 4)
+library(wordcloud)
+wordcloud(words = stats7$keyword, freq = stats$freq)
+```
+
+```{r}
+## Simple noun phrases (a adjective+noun, pre/postposition, optional determiner and another adjective+noun)
+verbatim_tokens$phrase_tag <- as_phrasemachine(verbatim_tokens$upos, type = "upos")
+stats8 <- keywords_phrases(x = verbatim_tokens$phrase_tag, term = verbatim_tokens$token, 
+                         pattern = "(A|N)+N(P+D*(A|N)*N)*", 
+                         is_regex = TRUE, ngram_max = 4, detailed = FALSE)
+head(subset(stats8, ngram > 2))
+```
+
+
+```{r}
+## Using Pointwise Mutual Information Collocations
+verbatim_tokens$word <- tolower(verbatim_tokens$token)
+stats <- keywords_collocation(x = verbatim_tokens, term = "word", group = "doc_id")
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ pmi, data = head(subset(stats, freq > 3), 20), col = "cadetblue", 
+         main = "Keywords identified by PMI Collocation", 
+         xlab = "PMI (Pointwise Mutual Information)")
+```
+
+```{r}
+## Using a sequence of POS tags (noun phrases / verb phrases)
+verbatim_tokens$phrase_tag <- as_phrasemachine(verbatim_tokens$upos, type = "upos")
+stats <- keywords_phrases(x = verbatim_tokens$phrase_tag, term = tolower(verbatim_tokens$token), 
+                          pattern = "(A|N)*N(P+D*(A|N)*N)*", 
+                          is_regex = TRUE, detailed = FALSE)
+stats <- subset(stats, ngram > 1 & freq > 3)
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ freq, data = head(stats, 20), col = "cadetblue", 
+         main = "Keywords - simple noun phrases", xlab = "Frequency")
+```
+
+```{r}
+cooc <- cooccurrence(x = subset(verbatim_tokens, upos %in% c("NOUN", "ADJ")), 
+                     term = "lemma", 
+                     group = c("doc_id", "paragraph_id", "sentence_id"))
+cooc
+
+```
+
+```{r}
+devtools::install_github("bnosac/textrank", build_vignettes = TRUE)
+```
+
+```{r}
+library(textrank)
+data(joboffer)
+cat(unique(joboffer$sentence), sep = "\n")
+```
+
+```{r}
+job_rawtxt <- readLines(system.file(package = "textrank", "extdata", "joboffer.txt"))
+job_rawtxt <- paste(job_rawtxt, collapse = "\n")
+job_rawtxt
+```
+
+```{r}
+joboffer_tokens <- udpipe(job_rawtxt, "english", udpipe_model_repo = "bnosac/udpipe.models.ud")
+joboffer_tokens <- as.data.frame(joboffer)
+head(joboffer[, c("sentence_id", "lemma", "upos")], 10)
+```
+
+```{r}
+keyw <- textrank_keywords(joboffer_tokens$lemma,
+                          relevant = joboffer_tokens$upos %in% c("NOUN", "VERB", "ADJ"))
+
+subset(keyw$keywords, ngram > 1 & freq > 1)
+```
+
+```{r,fig.width=6}
+keywv <- textrank_keywords(verbatim_tokens$lemma,
+                          relevant = verbatim_tokens$upos %in% c("NOUN", "ADJ"), 
+                          ngram_max = 8, sep = " ")
+
+stats <- subset(keywv$keywords, ngram > 1 & freq >= 5)
+library(wordcloud)
+wordcloud(words = stats$keyword, freq = stats$freq)
+
+```
+
+```{r}
+subset(keywv$keywords, freq > 1)
+```
+```{r}
+stats <- subset(stats$keywords, ngram > 1 & freq >= 5)
+library(wordcloud)
+wordcloud(words = stats$keyword, freq = stats$freq)
+```
+
+
+
+```{r}
+sentences <- unique(verbatim_tokens[, c("sentence_id", "sentence")])
+terminology <- subset(verbatim_tokens, upos %in% c("NOUN", "ADJ"))
+terminology <- terminology[, c("sentence_id", "lemma")]
+terminology <- unique(terminology[, c("sentence_id", "lemma")])
+head(terminology)
+```
+
+```{r}
+verbatim_tokens <- udpipe(verbatims, "english", udpipe_model_repo = "bnosac/udpipe.models.ud")
+class(verbatim_tokens)
+verbatim_tokens <- as.data.frame(verbatim_tokens, detailed = TRUE)
+
+verbatim_tokens$textrank_id <- unique_identifier(verbatim_tokens, fields = c("doc_id", "paragraph_id", "sentence_id"))
+
+result <- textrank_sentences(data = unique(verbatim_tokens[, c("textrank_id", "sentence")]), 
+                             terminology = verbatim_tokens[, c("textrank_id", "lemma")])
+result
+```
+
+##################calling python from R ############################################
+
+```{r}
+# you need reticulate package
+library("reticulate") # to make sure R uses python 3. I installed anaconda3 which comes with python 3 first and then installed spaCy using anaconda 3
+reticulate::use_python("/Users/Fahad/anaconda3/bin/python", required = T) #point R to use python 3 before doing anything else!!!
+reticulate::py_config() # confirm that it is using python 3
+```
+
+```{r}
+conda_list()
+```
+
+```{r}
+use_condaenv("anaconda3") 
+#Now we could use python
+```
+
+```{python}
+
+#install sumy a text summarisation python library by running the following command in the terminal pip install git+git://github.com/miso-belica/sumy.git
+from __future__ import absolute_import
+from __future__ import division, print_function, unicode_literals
+
+from sumy.parsers.html import HtmlParser
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lsa import LsaSummarizer as Summarizer
+from sumy.nlp.stemmers import Stemmer
+from sumy.utils import get_stop_words
+
+
+LANGUAGE = "czech"
+SENTENCES_COUNT = 10
+
+
+
+url = "http://www.zsstritezuct.estranky.cz/clanky/predmety/cteni/jak-naucit-dite-spravne-cist.html"
+parser = HtmlParser.from_url(url, Tokenizer(LANGUAGE))
+# or for plain text files
+# parser = PlaintextParser.from_file("document.txt", Tokenizer(LANGUAGE))
+stemmer = Stemmer(LANGUAGE)
+
+summarizer = Summarizer(stemmer)
+summarizer.stop_words = get_stop_words(LANGUAGE)
+sentences = []
+for sentence in summarizer(parser.document, SENTENCES_COUNT):
+        print(sentence)
+        sentences.append(sentence)
+        
+
+```
+
+
+```{r}
+repl_python()
+py$sentences
+```
+
+```{python}
+#Plain text parsers since we are parsing through text
+from sumy.parsers.plaintext import PlaintextParser
+
+#for tokenization
+from sumy.nlp.tokenizers import Tokenizer
+
+file = "401.txt"
+parser = PlaintextParser.from_file(file, Tokenizer("english"))
+
+from sumy.summarizers.lex_rank import LexRankSummarizer 
+summarizer = LexRankSummarizer()
+#Summarize the document with 2 sentences
+summary = summarizer(parser.document, 2) 
+for sentence in summary:
+  print(sentence)
+
+```
+
+```{python}
+#Plain text parsers since we are parsing through text
+from sumy.parsers.plaintext import PlaintextParser
+
+#for tokenization
+from sumy.nlp.tokenizers import Tokenizer
+
+file = "401.txt"
+parser = PlaintextParser.from_file(file, Tokenizer("english"))
+
+from sumy.summarizers.luhn import LuhnSummarizer
+summarizer_1 = LuhnSummarizer()
+summary_1 =summarizer_1(parser.document,2)
+for sentence in summary_1:
+  print(sentence)
+```
+
+
+```{python}
+#Plain text parsers since we are parsing through text
+from sumy.parsers.plaintext import PlaintextParser
+
+#for tokenization
+from sumy.nlp.tokenizers import Tokenizer
+
+file = "401.txt"
+parser = PlaintextParser.from_file(file, Tokenizer("english"))
+
+from sumy.summarizers.lsa import LsaSummarizer
+summarizer_2 = LsaSummarizer()
+summary_2 =summarizer_2(parser.document,2)
+for sentence in summary_2:
+ print(sentence)
+ 
+str(sentence)
+```
+
+```{python}
+#Plain text parsers since we are parsing through text
+from sumy.parsers.plaintext import PlaintextParser
+
+#for tokenization
+from sumy.nlp.tokenizers import Tokenizer
+
+file = "401.txt"
+parser = PlaintextParser.from_file(file, Tokenizer("english"))
+
+from sumy.summarizers.text_rank import TextRankSummarizer
+summarizer_3 = TextRankSummarizer()
+summary_3 =summarizer_3(parser.document,2)
+for sentence in summary_3:
+ print(sentence)
+```
+
+```{r}
+os <- import("os")
+os$listdir(".")
+sumy_r <- import("sumy")
+```
+
+```{r}
+library(tidyverse)
+
+bbc <- read_table("401.txt", col_names = FALSE) %>% filter(!is.na(X1)) %>% rename(text = X1)
+```
+
+```{r}
+bbc
+```
+
+## Tokenise using SpaCy
+
+```{r}
+my_spacy <- import("spacy")
+```
+
+
+```{python}
+#download spacy models in the terminal using the "python -m spacy download en_core_web_lg" where en_core_web_lg is a model name
+
+import spacy
+nlp = spacy.load('en_core_web_sm')
+doc = nlp(u'This is a sentence. Here is another one. Apple is looking at buying U.K. startup for $1 billion')
+
+for token in doc:
+    print(token.text, token.lemma_, token.pos_, token.tag_, token.dep_,
+          token.shape_, token.is_alpha, token.is_stop)
+
+for ent in doc.ents:
+    print(ent.text, ent.start_char, ent.end_char, ent.label_)
+```
+
+```{python}
+import spacy
+
+nlp = spacy.load('en_core_web_md')
+tokens = nlp(u'dog cat banana afskfsd')
+
+for token in tokens:
+    print(token.text, token.has_vector, token.vector_norm, token.is_oov)
+```
+
+
+```{r}
+saveRDS(bbc, file = "bbc_articles.rds")
+
+py_bbc <- r_to_py(bbc)
+```
+
+```{python}
+import spacy
+nlp = spacy.load('en_core_web_sm')
+text = open('401.txt', 'r').read() # open a document
+doc = nlp(text) # process it
+
+#print([t.text for t in doc])
+print([(t.text, t.lemma_) for t in doc])
+#print([(t.text, t.label_) for t in doc.ents])
+#print([(t.text, t.start_char, t.end_char, t.label_) for t in doc.ents])
+
+#for ent in doc.ents:
+ #   print(ent.text, ent.start_char, ent.end_char, ent.label_)
+```
+
+# using gensim
+
+```{python}
+from gensim.summarization.summarizer import summarize
+from gensim.summarization import keywords
+
+text = open('401.txt', 'r').read() # open a document
+
+print ('Summary:')
+print (summarize(text, ratio=0.01))
+ 
+print ('\nKeywords:')
+print (keywords(text, ratio=0.02))
+```
+
+```{python}
+from __future__ import absolute_import
+from __future__ import division, print_function, unicode_literals
+ 
+from sumy.parsers.html import HtmlParser
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lsa import LsaSummarizer
+from sumy.nlp.stemmers import Stemmer
+from sumy.utils import get_stop_words
+ 
+from sumy.summarizers.luhn import LuhnSummarizer
+from sumy.summarizers.edmundson import EdmundsonSummarizer   #found this is the best as 
+# it is picking from beginning also while other skip
+ 
+ 
+LANGUAGE = "english"
+SENTENCES_COUNT = 10
+ 
+ 
+if __name__ == "__main__":
+   
+   # parser = HtmlParser.from_url(url, Tokenizer(LANGUAGE))
+    # or for plain text files
+     parser = PlaintextParser.from_file("401.txt", Tokenizer(LANGUAGE))
+    
+ 
+        
+     print("--LsaSummarizer--")
+     summarizer = LsaSummarizer()
+     summarizer = LsaSummarizer(Stemmer(LANGUAGE))
+     summarizer.stop_words = get_stop_words(LANGUAGE)
+     for sentence in summarizer(parser.document, SENTENCES_COUNT):
+         print(sentence)
+         
+     print ("\n--LuhnSummarizer--")     
+     summarizer = LuhnSummarizer() 
+     summarizer = LsaSummarizer(Stemmer(LANGUAGE))
+     summarizer.stop_words = ("I", "am", "the", "you", "are", "me", "is", "than", "that", "this",)
+     for sentence in summarizer(parser.document, SENTENCES_COUNT):
+         print(sentence)
+         
+     print ("\n--EdmundsonSummarizer--")     
+     summarizer = EdmundsonSummarizer() 
+     words = ("online", "game", "playing" )
+     summarizer.bonus_words = words
+     
+     words = ("another", "and", "some", "next",)
+     summarizer.stigma_words = words
+    
+     
+     words = ("another", "and", "some", "next",)
+     summarizer.null_words = words
+     for sentence in summarizer(parser.document, SENTENCES_COUNT):
+         print(sentence)     
+
+         
+  
+```
+
+```{python}
+import os
+
+from symspellpy.symspellpy import SymSpell, Verbosity  # import the module
+#print(os.getcwd())
+#print(os.path.basename(__file__))
+#print(os.path.dirname(__file__))
+
+from symspellpy.symspellpy import SymSpell, Verbosity  # import the module
+
+def main():
+    # create object
+    initial_capacity = 83000
+    # maximum edit distance per dictionary precalculation
+    max_edit_distance_dictionary = 2
+    prefix_length = 7
+    sym_spell = SymSpell(initial_capacity, max_edit_distance_dictionary,
+                         prefix_length)
+    # load dictionary
+    dictionary_path = os.path.join(os.getcwd(),
+                                   "frequency_dictionary_en_82_765.txt")
+    term_index = 0  # column of the term in the dictionary text file
+    count_index = 1  # column of the term frequency in the dictionary text file
+    if not sym_spell.load_dictionary(dictionary_path, term_index, count_index):
+        print("Dictionary file not found")
+        return
+
+    # lookup suggestions for single-word input strings
+    input_term = "intrnet"  # misspelling of "members"
+    # max edit distance per lookup
+    # (max_edit_distance_lookup <= max_edit_distance_dictionary)
+    max_edit_distance_lookup = 1
+    suggestion_verbosity = Verbosity.CLOSEST  # TOP, CLOSEST, ALL
+    suggestions = sym_spell.lookup(input_term, suggestion_verbosity,
+                                   max_edit_distance_lookup)
+    # display suggestion term, term frequency, and edit distance
+    for suggestion in suggestions:
+        print("{}, {}, {}".format(suggestion.term, suggestion.count,
+                                  suggestion.distance))
+
+    # lookup suggestions for multi-word input strings (supports compound
+    # splitting & merging)
+  #  input_term = ("whereis th elove hehad dated forImuch of thepast who "
+  #                "couqdn'tread in sixtgrade and ins pired him")
+                  
+   # input_term = ("Can yu readthis messa ge despite thehorible sppelingmsitakes")
+                  
+  #  input_term = open('401.txt', 'r').read() # open a document
+    # max edit distance per lookup (per single word, not per whole input string)
+ #   max_edit_distance_lookup = 2
+#    suggestions = sym_spell.lookup_compound(input_term,
+ #                                           max_edit_distance_lookup)
+    # display suggestion term, term frequency and edit distance
+ #   for suggestion in suggestions:
+ #       print("{}, {}, {}".format(suggestion.term, suggestion.count,
+ #                                 suggestion.distance))
+
+
+if __name__ == "__main__":
+    main()
+
+
+```
+
+
+```{python}
+import pandas as pd
+#data = pd.read_csv('401.txt',  header=None)
+df = pd.read_table("401.txt", sep="/n", header=None,engine='python')
+#print(df)
+```
+
+```{r}
+py$df
 ```
 
